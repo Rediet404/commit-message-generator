@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.Python
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Test, coverage, and tooling caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+
+# Local editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Data, model artifacts, and generated experiment outputs
+data/raw/*
+data/processed/*
+data/splits/*
+results/*
+checkpoints/
+models/
+*.ckpt
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.h5
+*.parquet
+*.arrow
+*.pkl
+*.pickle
+*.joblib
+
+# Caches and temporary files
+.cache/
+hf_cache/
+transformers_cache/
+*.log
+*.tmp
+*.temp
+tmp/
+temp/

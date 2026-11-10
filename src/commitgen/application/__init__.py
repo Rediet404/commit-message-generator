@@ -1,0 +1,1 @@
+"""Git-facing application components."""
