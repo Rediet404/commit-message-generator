@@ -1,10 +1,12 @@
-"""Zero-shot CodeT5 generation with explicit input-length handling."""
+"""CodeT5 generation for docstrings and commit messages with explicit input-length handling."""
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
 from typing import Any
+
+from commitgen.preprocessing.style import format_style
 
 
 @dataclass(frozen=True)
@@ -15,6 +17,8 @@ class GenerationSettings:
     num_beams: int = 4
     device: str = "cpu"
     input_prefix: str = "summarize: "
+    style_mood: str | None = None  # "imperative" | "descriptive" | None
+    style_length: str | None = None  # "short" | "detailed" | None
 
 
 @dataclass
@@ -28,7 +32,7 @@ class Prediction:
 
 
 class CodeT5Generator:
-    """Lazy-loading CodeT5 wrapper. It never fine-tunes or mutates model weights."""
+    """Lazy-loading CodeT5 wrapper supporting both CodeT5-small and codet5-base-multi-sum."""
 
     def __init__(self, settings: GenerationSettings | None = None, model: Any = None, tokenizer: Any = None):
         self.settings = settings or GenerationSettings()
@@ -56,10 +60,10 @@ class CodeT5Generator:
             )
             raise self._load_error from exc
 
-    def prepare_input(self, diff: str) -> tuple[Any, int, bool]:
+    def prepare_input(self, text: str) -> tuple[Any, int, bool]:
         self._load()
         encoded = self._tokenizer(
-            self.settings.input_prefix + diff,
+            self.settings.input_prefix + text,
             return_tensors="pt",
             truncation=False,
         )
@@ -67,18 +71,19 @@ class CodeT5Generator:
         truncated = input_tokens > self.settings.max_input_tokens
         if truncated:
             encoded = self._tokenizer(
-                self.settings.input_prefix + diff,
+                self.settings.input_prefix + text,
                 return_tensors="pt",
                 truncation=True,
                 max_length=self.settings.max_input_tokens,
             )
         return encoded, input_tokens, truncated
 
-    def generate(self, diff: str) -> Prediction:
+    def generate(self, input_text: str) -> Prediction:
+        """Generate a one-line summary from function code or a git diff."""
         started = time.perf_counter()
         try:
             self._load()
-            encoded, input_tokens, truncated = self.prepare_input(diff)
+            encoded, input_tokens, truncated = self.prepare_input(input_text)
             generated = self._model.generate(
                 **encoded,
                 max_new_tokens=self.settings.max_output_tokens,
@@ -87,6 +92,15 @@ class CodeT5Generator:
                 early_stopping=True,
             )
             text = self._tokenizer.decode(generated[0], skip_special_tokens=True).strip()
+
+            # Apply style transformations if configured
+            if text and (self.settings.style_mood or self.settings.style_length):
+                text = format_style(
+                    text,
+                    mood=self.settings.style_mood,
+                    length=self.settings.style_length,
+                )
+
             status = "ok" if text else "empty"
             return Prediction(text, input_tokens, truncated, time.perf_counter() - started, status)
         except Exception as exc:
@@ -98,3 +112,11 @@ class CodeT5Generator:
                 "error",
                 str(exc),
             )
+
+    def generate_docstring(self, code: str) -> Prediction:
+        """Generate a one-line docstring description from function code."""
+        return self.generate(code)
+
+    def generate_commit_message(self, diff: str) -> Prediction:
+        """Generate a one-line commit subject from a git diff."""
+        return self.generate(diff)

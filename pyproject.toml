@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "commit-message-generator"
 version = "0.1.0"
-description = "A research project for generating Git commit messages from diffs."
+description = "A research project for generating Git commit messages from diffs and docstrings from code."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -18,6 +18,9 @@ dependencies = []
 dev = [
     "pytest==9.2.0",
 ]
+
+[project.scripts]
+commitgen = "commitgen.application.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
