@@ -68,13 +68,19 @@ def write_rating_sheet(path: Path, records: list[dict[str, object]], sample_size
             handle.write(",".join('"' + str(field).replace('"', '""') + '"' for field in fields) + "\n")
 
 
-def run_experiment(split_path: Path, output_dir: Path, smoke: int | None = None) -> dict[str, object]:
+def run_experiment(
+    split_path: Path,
+    output_dir: Path,
+    smoke: int | None = None,
+    model_name: str = "Salesforce/codet5-small",
+    output_name: str | None = None,
+) -> dict[str, object]:
     examples = load_jsonl(split_path)
     if smoke is not None:
         examples = examples[:smoke]
-    generator = CodeT5Generator(GenerationSettings())
+    generator = CodeT5Generator(GenerationSettings(model_name=model_name))
     records = run_predictions(examples, generator)
-    suffix = "smoke" if smoke is not None else "test"
+    suffix = output_name or ("smoke" if smoke is not None else "test")
     write_jsonl(output_dir / f"predictions_{suffix}.jsonl", records)
     write_rating_sheet(output_dir / "human_rating_sheet.csv", records)
     successful = sum(record["codet5_status"] == "ok" for record in records)
@@ -86,8 +92,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--split", type=Path, default=Path("data/splits/test.jsonl"))
     parser.add_argument("--output-dir", type=Path, default=Path("results"))
     parser.add_argument("--smoke", type=int)
+    parser.add_argument("--model-name", default="Salesforce/codet5-small")
+    parser.add_argument("--output-name", help="Prediction filename suffix, without predictions_ or .jsonl")
     args = parser.parse_args(argv)
-    print(json.dumps(run_experiment(args.split, args.output_dir, args.smoke), indent=2))
+    print(json.dumps(
+        run_experiment(args.split, args.output_dir, args.smoke, args.model_name, args.output_name),
+        indent=2,
+    ))
     return 0
 
 

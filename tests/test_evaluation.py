@@ -33,6 +33,17 @@ def test_incomplete_ratings_are_pending_and_reported(tmp_path: Path) -> None:
     assert result["missing_ratings"]
 
 
+def test_rating_sheet_with_wrong_row_count_is_pending(tmp_path: Path) -> None:
+    path = tmp_path / "ratings.csv"
+    values = ["id", "ref", "A", "B"] + ["3"] * 16 + ["System A", "3", ""] * 2
+    path.write_text(",".join(RATING_COLUMNS) + "\n" + ",".join(values) + "\n", encoding="utf-8")
+
+    result = analyze_ratings(path)
+
+    assert result["status"] == "pending"
+    assert any(item["column"] == "row_count" for item in result["invalid_ratings"])
+
+
 def test_failure_analysis_records_truncation_and_categories() -> None:
     predictions = [{
         "example_id": "r::1",

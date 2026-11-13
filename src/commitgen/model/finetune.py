@@ -16,9 +16,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from commitgen.data.docstrings import load_code_docstring_dataset
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -29,7 +26,7 @@ class FineTuneConfig:
     learning_rate: float = 5e-5
     batch_size: int = 4
     num_epochs: int = 3
-    max_input_length: int = 256
+    max_input_length: int = 512
     max_target_length: int = 32
     device: str = "cpu"
     input_prefix: str = "summarize: "
@@ -44,6 +41,7 @@ class CodeDocstringDataset:
         self.examples = examples
         self.tokenizer = tokenizer
         self.config = config
+        self.truncated_examples = 0
 
     def __len__(self) -> int:
         return len(self.examples)
@@ -52,6 +50,15 @@ class CodeDocstringDataset:
         item = self.examples[idx]
         input_text = item.get("code") or item.get("diff") or ""
         target_text = item.get("docstring") or item.get("commit_subject") or ""
+
+        measured = self.tokenizer(
+            self.config.input_prefix + input_text,
+            max_length=1_000_000,
+            truncation=False,
+            return_tensors="pt",
+        )
+        if measured["input_ids"].shape[-1] > self.config.max_input_length:
+            self.truncated_examples += 1
 
         inputs = self.tokenizer(
             self.config.input_prefix + input_text,
@@ -210,6 +217,8 @@ def finetune(
         "total_examples": len(dataset_records),
         "train_examples": len(train_data),
         "val_examples": len(val_data),
+        "train_truncated_examples": train_ds.truncated_examples,
+        "validation_truncated_examples": val_ds.truncated_examples,
         "total_training_time_seconds": round(time.perf_counter() - start_time, 2),
         "history": history,
         "checkpoint_dir": str(output_path),
@@ -220,20 +229,53 @@ def finetune(
     return report
 
 
+def load_training_records(path: Path) -> list[dict[str, str]]:
+    """Load either commit records or code-docstring records from JSONL."""
+    records: list[dict[str, str]] = []
+    with path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid JSON on line {line_number} of {path}") from exc
+
+            if item.get("diff") and item.get("commit_subject"):
+                records.append(item)
+            elif (item.get("code") or item.get("func_code")) and (
+                item.get("docstring") or item.get("doc") or item.get("summary")
+            ):
+                records.append(item)
+            else:
+                raise ValueError(
+                    f"Record on line {line_number} of {path} lacks either "
+                    "(diff, commit_subject) or (code, docstring) fields"
+                )
+    if not records:
+        raise ValueError(f"No training records found in {path}")
+    return records
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", type=Path, help="Path to JSONL dataset (code-docstrings or commits)")
+    parser.add_argument("--dataset", type=Path, required=True, help="Training JSONL dataset")
+    parser.add_argument("--validation-dataset", type=Path, help="Optional validation JSONL dataset")
     parser.add_argument("--output-dir", type=str, default="models/finetuned")
     parser.add_argument("--model-name", type=str, default="Salesforce/codet5-small")
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--lr", type=float, default=5e-5)
-    parser.add_argument("--smoke", type=int, help="Limit number of training samples for quick smoke test")
+    parser.add_argument("--smoke", type=int, help="Limit training samples for a quick smoke test")
+    parser.add_argument("--validation-smoke", type=int, help="Limit validation samples for a quick smoke test")
     args = parser.parse_args(argv)
 
-    records = load_code_docstring_dataset(args.dataset)
+    records = load_training_records(args.dataset)
     if args.smoke:
         records = records[:args.smoke]
+    val_records = load_training_records(args.validation_dataset) if args.validation_dataset else None
+    if val_records is not None and args.validation_smoke:
+        val_records = val_records[:args.validation_smoke]
 
     config = FineTuneConfig(
         model_name=args.model_name,
@@ -244,7 +286,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     print(f"Starting fine-tuning on {len(records)} examples...")
-    result = finetune(records, config)
+    result = finetune(records, config, val_records=val_records)
     print(json.dumps(result, indent=2))
     return 0
 

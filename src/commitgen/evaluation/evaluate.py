@@ -118,7 +118,13 @@ def analyze_ratings(path: Path) -> dict[str, object]:
         p1, p2 = row.get("rater_1_preference", ""), row.get("rater_2_preference", "")
         if p1 in PREFERENCES and p2 in PREFERENCES:
             preference_pairs.append((p1, p2))
-    complete = not missing and not invalid and bool(rows)
+    example_ids = [row.get("example_id", "") for row in rows]
+    duplicate_ids = sorted({example_id for example_id in example_ids if example_id and example_ids.count(example_id) > 1})
+    for example_id in duplicate_ids:
+        invalid.append({"example_id": example_id, "column": "example_id", "value": "duplicate"})
+    if len(rows) != 30:
+        invalid.append({"example_id": "", "column": "row_count", "value": str(len(rows))})
+    complete = not missing and not invalid and len(rows) == 30 and len(set(example_ids)) == 30
     agreement = {
         "paired_preference_agreement_count": sum(left == right for left, right in preference_pairs),
         "paired_preference_count": len(preference_pairs),
@@ -142,7 +148,7 @@ def analyze_ratings(path: Path) -> dict[str, object]:
         "status": "complete" if complete else "pending",
         "rows": len(rows),
         "expected_rows": 30,
-        "complete_rows": len(rows) - len({item["example_id"] for item in missing + invalid}),
+        "complete_rows": len(rows) - len({item["example_id"] for item in missing + invalid if item["example_id"]}),
         "averages": averages,
         "overall_averages": overall,
         "preference_counts": dict(preference_counts),
@@ -178,7 +184,11 @@ def _category(row: dict[str, object]) -> str:
     code = str(row.get("codet5_prediction") or "").strip()
     if not code:
         return "empty CodeT5 output"
-    if re.search(r"[{}\[\]`;]|={1,2}|```", code) or len(code.split()) > 18:
+    if (
+        re.search(r"[{}\[\]`;]|={1,2}|```|\+\+\+|---|@@|diff --git|(?:^|\s)[ab]/\S+", code)
+        or "\n" in code
+        or len(code.split()) > 18
+    ):
         return "code-like or malformed CodeT5 output"
     if code.lower() in {"update", "changes", "fix"}:
         return "generic CodeT5 output"
@@ -231,15 +241,36 @@ def failure_analysis(predictions: Sequence[dict[str, object]], dataset: Sequence
     }
 
 
-def build_report(predictions_path: Path, dataset_path: Path, ratings_path: Path) -> dict[str, object]:
+def build_report(
+    predictions_path: Path,
+    dataset_path: Path,
+    ratings_path: Path,
+    manifest_path: Path | None = None,
+) -> dict[str, object]:
     predictions = load_jsonl(predictions_path)
     dataset = load_jsonl(dataset_path)
+    prediction_ids = [str(row.get("example_id", "")) for row in predictions]
+    dataset_ids = [f"{row['repository']}::{row['commit_sha']}" for row in dataset]
+    if len(prediction_ids) != len(set(prediction_ids)):
+        raise ValueError(f"Prediction file contains duplicate example IDs: {predictions_path}")
+    if set(prediction_ids) != set(dataset_ids):
+        raise ValueError(
+            "Prediction/example mismatch: predictions must contain exactly the dataset test IDs "
+            f"(missing={len(set(dataset_ids) - set(prediction_ids))}, "
+            f"extra={len(set(prediction_ids) - set(dataset_ids))})"
+        )
     rating_results = analyze_ratings(ratings_path)
+    manifest = {}
+    if manifest_path and manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    split_counts = manifest.get("record_counts", {}) if isinstance(manifest, dict) else {}
+    dataset_size = sum(split_counts.values()) if split_counts else None
+    test_repositories = sorted({str(row["repository"]) for row in dataset})
     return {
         "setup": {
-            "dataset_size": 1000,
-            "train_validation_test": {"train": 724, "validation": 227, "test": 49},
-            "test_repository": "encode/httpx",
+            "dataset_size": dataset_size,
+            "train_validation_test": split_counts,
+            "test_repository": test_repositories,
             "evaluated_examples": len(predictions),
             "model": "Salesforce/codet5-small zero-shot, CPU, 512 input tokens, 32 max new tokens, 4 beams",
             "baseline": "deterministic changed-filename baseline",
@@ -277,13 +308,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--predictions", type=Path, default=Path("results/predictions_test.jsonl"))
     parser.add_argument("--dataset", type=Path, default=Path("data/splits/test.jsonl"))
     parser.add_argument("--ratings", type=Path, default=Path("results/human_rating_sheet.csv"))
+    parser.add_argument("--manifest", type=Path, default=Path("data/splits/manifest.json"))
     parser.add_argument("--output", type=Path, default=Path("results/evaluation_report.json"))
     parser.add_argument("--expand-rating-sheet", action="store_true")
     args = parser.parse_args(argv)
     if args.expand_rating_sheet:
         expand_rating_sheet(args.ratings)
     write_rating_guide(args.output.parent / "human_rating_guide.md")
-    report = build_report(args.predictions, args.dataset, args.ratings)
+    report = build_report(args.predictions, args.dataset, args.ratings, args.manifest)
     args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({
         "human_status": report["human_evaluation"]["status"],

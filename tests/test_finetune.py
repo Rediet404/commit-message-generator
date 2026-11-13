@@ -1,5 +1,5 @@
 import pytest
-from commitgen.model.finetune import CodeDocstringDataset, FineTuneConfig
+from commitgen.model.finetune import CodeDocstringDataset, FineTuneConfig, load_training_records
 
 
 def test_finetune_config_defaults() -> None:
@@ -14,7 +14,7 @@ def test_code_docstring_dataset_tokenization() -> None:
     class FakeTokenizer:
         pad_token_id = 0
 
-        def __call__(self, text, max_length, padding, truncation, return_tensors):
+        def __call__(self, text, max_length=None, padding=None, truncation=False, return_tensors=None):
             import torch
             # Return fixed dummy tensor
             token_ids = torch.tensor([[1, 2, 3, 0]])
@@ -29,3 +29,23 @@ def test_code_docstring_dataset_tokenization() -> None:
     assert "labels" in sample
     # Check that pad_token_id was replaced by -100 in labels
     assert (sample["labels"] == -100).any()
+
+
+def test_load_training_records_accepts_commit_pairs(tmp_path) -> None:
+    path = tmp_path / "commits.jsonl"
+    path.write_text(
+        '{"diff": "diff --git a/a.py b/a.py", "commit_subject": "Update a"}\n',
+        encoding="utf-8",
+    )
+
+    records = load_training_records(path)
+
+    assert records[0]["commit_subject"] == "Update a"
+
+
+def test_load_training_records_rejects_unpaired_records(tmp_path) -> None:
+    path = tmp_path / "invalid.jsonl"
+    path.write_text('{"diff": "only a diff"}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="lacks either"):
+        load_training_records(path)

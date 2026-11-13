@@ -66,6 +66,7 @@ class CodeT5Generator:
             self.settings.input_prefix + text,
             return_tensors="pt",
             truncation=False,
+            max_length=1_000_000,
         )
         input_tokens = int(encoded["input_ids"].shape[-1])
         truncated = input_tokens > self.settings.max_input_tokens

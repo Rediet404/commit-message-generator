@@ -49,6 +49,17 @@ def get_diff_summary() -> str:
         return ""
 
 
+def _read_diff_argument(value: str) -> str:
+    """Read a diff path, or treat the argument as a raw diff without path errors."""
+    candidate = Path(value)
+    try:
+        if candidate.is_file():
+            return candidate.read_text(encoding="utf-8")
+    except OSError:
+        pass
+    return value
+
+
 def run_git_commit(message: str) -> bool:
     """Execute git commit -m <message>."""
     try:
@@ -64,6 +75,7 @@ def generate_commit_suggestion(
     model: str = "codet5",
     mood: str | None = "imperative",
     length: str | None = "short",
+    model_path: str | None = None,
 ) -> str:
     """Generate a commit message using CodeT5 or deterministic baseline."""
     if model.lower() == "baseline":
@@ -71,6 +83,7 @@ def generate_commit_suggestion(
     else:
         try:
             settings = GenerationSettings(
+                model_name=model_path or "Salesforce/codet5-small",
                 style_mood=mood,
                 style_length=length,
             )
@@ -79,7 +92,10 @@ def generate_commit_suggestion(
             if prediction.status == "ok" and prediction.text.strip():
                 raw = prediction.text.strip()
             else:
-                # Fallback to baseline if model output is empty or malformed
+                print(
+                    f"CodeT5 returned {prediction.status}; using the baseline fallback.",
+                    file=sys.stderr,
+                )
                 raw = generate_diff_baseline(diff)
         except Exception as exc:
             print(f"CodeT5 unavailable ({exc}); falling back to baseline.", file=sys.stderr)
@@ -93,6 +109,7 @@ def generate_docstring_suggestion(
     model: str = "codet5",
     mood: str | None = "imperative",
     length: str | None = "short",
+    model_path: str | None = None,
 ) -> str:
     """Generate a docstring description from Python function code."""
     if model.lower() == "baseline":
@@ -100,6 +117,7 @@ def generate_docstring_suggestion(
     else:
         try:
             settings = GenerationSettings(
+                model_name=model_path or "Salesforce/codet5-small",
                 style_mood=mood,
                 style_length=length,
             )
@@ -108,8 +126,13 @@ def generate_docstring_suggestion(
             if prediction.status == "ok" and prediction.text.strip():
                 raw = prediction.text.strip()
             else:
+                print(
+                    f"CodeT5 returned {prediction.status}; using the baseline fallback.",
+                    file=sys.stderr,
+                )
                 raw = generate_code_baseline(code)
-        except Exception:
+        except Exception as exc:
+            print(f"CodeT5 unavailable ({exc}); using the baseline fallback.", file=sys.stderr)
             raw = generate_code_baseline(code)
 
     return format_style(raw, mood=mood, length=length)
@@ -118,7 +141,7 @@ def generate_docstring_suggestion(
 def handle_commit(args: argparse.Namespace) -> int:
     """Handle git commit message generation and interactive confirmation."""
     if args.diff:
-        diff = Path(args.diff).read_text(encoding="utf-8") if Path(args.diff).is_file() else args.diff
+        diff = _read_diff_argument(args.diff)
     else:
         diff = get_staged_diff()
 
@@ -138,6 +161,7 @@ def handle_commit(args: argparse.Namespace) -> int:
         model=args.model,
         mood=args.mood,
         length=args.length,
+        model_path=args.model_path,
     )
 
     print(f"\nProposed commit message:\n  {suggestion}\n")
@@ -198,6 +222,7 @@ def handle_docstring(args: argparse.Namespace) -> int:
         model=args.model,
         mood=args.mood,
         length=args.length,
+        model_path=args.model_path,
     )
 
     print(f"\nGenerated Docstring:\n  \"\"\"{suggestion}\"\"\"\n")
@@ -213,11 +238,10 @@ def handle_docstring(args: argparse.Namespace) -> int:
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     if not ast.get_docstring(node):
-                        # Find line after def
-                        def_line_idx = node.lineno - 1
+                        first_body_line_idx = node.body[0].lineno - 1
                         indent = " " * (node.col_offset + 4)
                         doc_line = f'{indent}"""{suggestion}"""'
-                        lines.insert(def_line_idx + 1, doc_line)
+                        lines.insert(first_body_line_idx, doc_line)
                         inserted = True
                         break
             if inserted:
@@ -243,6 +267,7 @@ def create_parser() -> argparse.ArgumentParser:
     commit_parser = subparsers.add_parser("commit", help="Generate commit message from staged changes")
     commit_parser.add_argument("--diff", type=str, help="Path to diff file or raw diff string (defaults to git diff --cached)")
     commit_parser.add_argument("--model", choices=["codet5", "baseline"], default="codet5", help="Generation engine")
+    commit_parser.add_argument("--model-path", help="Local CodeT5 checkpoint directory (optional)")
     commit_parser.add_argument("--mood", choices=["imperative", "descriptive"], default="imperative", help="Verb style")
     commit_parser.add_argument("--length", choices=["short", "detailed"], default="short", help="Length preference")
     commit_parser.add_argument("-y", "--yes", action="store_true", help="Auto-commit without confirmation")
@@ -252,6 +277,7 @@ def create_parser() -> argparse.ArgumentParser:
     doc_parser.add_argument("--code", type=str, help="Function code string")
     doc_parser.add_argument("--file", type=str, help="Path to Python file")
     doc_parser.add_argument("--model", choices=["codet5", "baseline"], default="codet5", help="Generation engine")
+    doc_parser.add_argument("--model-path", help="Local CodeT5 checkpoint directory (optional)")
     doc_parser.add_argument("--mood", choices=["imperative", "descriptive"], default="imperative", help="Verb style")
     doc_parser.add_argument("--length", choices=["short", "detailed"], default="short", help="Length preference")
     doc_parser.add_argument("-w", "--write", action="store_true", help="Write docstring back to file")

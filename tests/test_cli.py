@@ -29,6 +29,7 @@ def test_cli_parser_creation() -> None:
     assert commit_args.command == "commit"
     assert commit_args.model == "baseline"
     assert commit_args.yes is True
+    assert parser.parse_args(["commit", "--model-path", "models/finetuned-commits"]).model_path == "models/finetuned-commits"
 
     doc_args = parser.parse_args(["docstring", "--code", "def f(): pass", "--model", "codet5", "-w"])
     assert doc_args.command == "docstring"
