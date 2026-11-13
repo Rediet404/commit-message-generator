@@ -384,6 +384,26 @@ clean = format_style("Fixes null pointer in auth module, closing issue #12", moo
 An end-to-end interactive demonstration is provided in:
 - [`notebooks/docstring_and_commit_writer.ipynb`](./notebooks/docstring_and_commit_writer.ipynb)
 
+The notebook has been executed with the current source tree and includes
+captured outputs for:
+
+- baseline generation from a diff, a commented function, and a function-name
+  fallback (`Update auth`, `Authenticate user session with token verification`,
+  and `Execute calculate total tax`);
+- CodeT5 generator initialization with the default CPU settings;
+- loading 8 starter code-docstring pairs;
+- the completed ROUGE and human-rating report (30 samples, 2 raters, 96.7%
+  agreement);
+- developer-style analysis (75% imperative, 87.5% short messages in the
+  eight-message demonstration sample); and
+- the programmatic CLI helpers (`Update config` and
+  `Return hex digest of SHA-256 hash`).
+
+The CodeT5 and fine-tuning cells intentionally demonstrate configuration and
+lazy initialization. They do not download a model or start a training run.
+Use the CLI commands and fine-tuning commands above when you want to run those
+operations explicitly.
+
 ---
 
 ## Status
@@ -399,4 +419,4 @@ All planned stages are complete:
 - [x] Failure analysis & word-copying critique
 - [x] Developer style acceptance & transformation (Project 2 growth)
 - [x] Staged-diff commit & docstring CLI with interactive user confirmation
-- [x] Colab/Jupyter demonstration notebook
+- [x] Executed Colab/Jupyter demonstration notebook with captured outputs
