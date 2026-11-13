@@ -1,3 +1,11 @@
+# Group Members:
+
+## Rediet Mesfin     ATE/502014
+## Yohannes Siyum    ATE/5195/14 
+## Esrom  Basaznew   ATE/5227/14
+## Kalkidan Tadesse  ATE/0652/14
+## Eisha Gieder      ATE/1084/14
+
 # Docstring and Commit-Message Writer
 
 **Target User:** Developers who skip documentation and write commit messages like `"fix"`.
