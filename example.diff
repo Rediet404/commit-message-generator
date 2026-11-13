@@ -1,0 +1,8 @@
+diff --git a/auth.py b/auth.py
+--- a/auth.py
++++ b/auth.py
+@@ -1,2 +1,2 @@
+-def authenticate(token):
+-    return token
++def authenticate(token):
++    return verify_token(token)
